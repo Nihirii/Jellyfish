@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Méduses</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Méduses</h1>
+      <p class="scores">
+        Score <strong id="score">0</strong>
+        <span aria-hidden="true">·</span>
+        Record <strong id="best">0</strong>
+      </p>
+    </header>
+
+    <div class="stage">
+      <canvas id="game" width="480" height="640" aria-label="Zone de jeu"></canvas>
+
+      <div id="overlay" class="overlay">
+        <h2 id="overlay-title">Méduses</h2>
+        <p id="overlay-text">
+          Guide ta méduse avec la souris, le doigt ou les flèches.<br />
+          Mange le plancton lumineux, évite les tortues.
+        </p>
+        <button id="play" type="button">Jouer</button>
+      </div>
+    </div>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
