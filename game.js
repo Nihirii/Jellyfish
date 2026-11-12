@@ -19,6 +19,7 @@ const KEY_SPEED = 260; // px/s avec le clavier
 // ---------- État ----------
 let jelly;
 let plankton;
+let sparks;
 let turtles;
 let bubbles;
 let score;
@@ -56,19 +57,24 @@ function saveBest(value) {
 // ---------- Création des entités ----------
 function spawnPlankton() {
   return {
-    x: rand(20, W - 20),
-    y: rand(60, H - 40),
-    r: rand(4, 7),
+    hx: rand(24, W - 24), // point d'ancrage autour duquel il dérive
+    hy: rand(70, H - 40),
+    x: 0,
+    y: 0,
+    r: rand(4, 6),
     phase: rand(0, Math.PI * 2),
+    age: 0,
   };
 }
 
 function spawnTurtle() {
   const fromLeft = Math.random() < 0.5;
   const speed = rand(70, 120) + elapsed * 3; // ça accélère avec le temps
+  const y = rand(40, H - 40);
   return {
-    x: fromLeft ? -40 : W + 40,
-    y: rand(40, H - 40),
+    x: fromLeft ? -50 : W + 50,
+    y,
+    baseY: y,
     vx: fromLeft ? speed : -speed,
     r: 22,
     phase: rand(0, Math.PI * 2),
@@ -78,6 +84,7 @@ function spawnTurtle() {
 function reset() {
   jelly = createJelly(W / 2, H * 0.7);
   plankton = Array.from({ length: 5 }, spawnPlankton);
+  sparks = [];
   turtles = [];
   score = 0;
   elapsed = 0;
@@ -141,14 +148,28 @@ function update(dt) {
 
   updateJelly(jelly, dt);
 
-  // Plancton mangé ?
+  // Plancton : dérive lente, puis mangé au contact
   for (let i = 0; i < plankton.length; i++) {
-    if (dist(jelly, plankton[i]) < jelly.r + plankton[i].r) {
+    const p = plankton[i];
+    p.age += dt;
+    p.x = p.hx + Math.sin(elapsed * 0.7 + p.phase) * 10;
+    p.y = p.hy + Math.cos(elapsed * 0.5 + p.phase * 1.3) * 7;
+    if (p.age > 0.3 && dist(jelly, p) < jelly.r + p.r) {
+      burst(p.x, p.y);
       plankton[i] = spawnPlankton();
       score++;
       scoreEl.textContent = score;
     }
   }
+
+  for (const s of sparks) {
+    s.x += s.vx * dt;
+    s.y += s.vy * dt;
+    s.vx *= 1 - 2.5 * dt;
+    s.vy *= 1 - 2.5 * dt;
+    s.life -= dt * 1.4;
+  }
+  sparks = sparks.filter((s) => s.life > 0);
 
   // Tortues
   turtleTimer -= dt;
@@ -158,19 +179,21 @@ function update(dt) {
   }
   for (const t of turtles) {
     t.x += t.vx * dt;
-    t.phase += dt * 6;
+    t.phase += dt * 2.4;
+    t.y = t.baseY + Math.sin(t.phase * 0.5) * 5;
     if (dist(jelly, t) < jelly.r + t.r - 6) {
       gameOver();
       return;
     }
   }
-  turtles = turtles.filter((t) => t.x > -60 && t.x < W + 60);
+  turtles = turtles.filter((t) => t.x > -70 && t.x < W + 70);
 }
 
 // ---------- Dessin ----------
 function draw(time) {
   drawWater(time);
   for (const p of plankton) drawPlankton(p, time);
+  drawSparks();
   for (const t of turtles) drawTurtle(t);
   drawJelly(jelly);
   drawVignette();
@@ -286,15 +309,59 @@ function drawVignette() {
   ctx.fillRect(0, 0, W, H);
 }
 
+// ---------- Plancton ----------
+// Un petit point bioluminescent : cœur net, halo doux et quelques
+// particules qui tournent autour.
+
+function burst(x, y) {
+  for (let i = 0; i < 14; i++) {
+    const a = rand(0, Math.PI * 2);
+    const v = rand(20, 70);
+    sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rand(0.6, 1) });
+  }
+}
+
 function drawPlankton(p, time) {
-  const glow = 0.6 + Math.sin(time * 3 + p.phase) * 0.4;
+  const fade = Math.min(1, p.age / 0.8);
+  const breath = 0.65 + Math.sin(time * 2.2 + p.phase) * 0.35;
+  const a = fade * breath;
+
   ctx.save();
-  ctx.shadowColor = "#b8ff6b";
-  ctx.shadowBlur = 12 * glow;
-  ctx.fillStyle = `rgba(184, 255, 107, ${0.5 + glow * 0.5})`;
+  ctx.globalCompositeOperation = "lighter";
+
+  const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 5);
+  halo.addColorStop(0, `rgba(120, 255, 220, ${0.5 * a})`);
+  halo.addColorStop(0.4, `rgba(80, 220, 255, ${0.12 * a})`);
+  halo.addColorStop(1, "rgba(80, 220, 255, 0)");
+  ctx.fillStyle = halo;
+  ctx.fillRect(p.x - p.r * 5, p.y - p.r * 5, p.r * 10, p.r * 10);
+
+  ctx.fillStyle = `rgba(225, 255, 245, ${0.9 * a})`;
   ctx.beginPath();
-  ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+  ctx.arc(p.x, p.y, p.r * 0.45, 0, Math.PI * 2);
   ctx.fill();
+
+  for (let k = 0; k < 3; k++) {
+    const ang = time * (0.8 + k * 0.3) + p.phase + (k * Math.PI * 2) / 3;
+    const d = p.r * (1.1 + k * 0.35);
+    ctx.fillStyle = `rgba(160, 255, 230, ${0.55 * a})`;
+    ctx.beginPath();
+    ctx.arc(p.x + Math.cos(ang) * d, p.y + Math.sin(ang) * d * 0.7, 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawSparks() {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const s of sparks) {
+    ctx.fillStyle = `rgba(160, 255, 230, ${s.life * 0.8})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 0.6 + s.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -482,48 +549,88 @@ function drawJelly(j) {
   ctx.restore();
 }
 
+// ---------- Tortue ----------
+// Silhouette sombre en contre-jour : seuls les contours captent la lumière.
+
+const TURTLE_FILL = "rgba(5, 16, 30, 0.94)";
+const TURTLE_RIM = "rgba(150, 205, 255, 0.42)";
+
+function flipper(len, width, angle) {
+  ctx.save();
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0, -width * 0.5);
+  ctx.bezierCurveTo(-len * 0.2, -width, -len * 0.75, -width * 0.4, -len, 0);
+  ctx.bezierCurveTo(-len * 0.7, width * 0.35, -len * 0.25, width * 0.6, 0, width * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawTurtle(t) {
+  const r = t.r;
   const dir = Math.sign(t.vx);
-  const flap = Math.sin(t.phase) * 0.5;
+  const stroke = Math.sin(t.phase); // battement des nageoires
 
   ctx.save();
   ctx.translate(t.x, t.y);
   ctx.scale(dir, 1);
+  ctx.fillStyle = TURTLE_FILL;
+  ctx.strokeStyle = TURTLE_RIM;
+  ctx.lineWidth = 1;
 
-  // Nageoires
-  ctx.fillStyle = "#4fa36b";
+  // Nageoires arrière
   for (const side of [-1, 1]) {
     ctx.save();
-    ctx.translate(6, side * 12);
-    ctx.rotate(side * (0.6 + flap));
-    ctx.beginPath();
-    ctx.ellipse(0, side * 8, 5, 12, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.translate(-r * 0.7, side * r * 0.4);
+    flipper(r * 0.55, r * 0.3, -side * (0.5 + stroke * 0.15));
+    ctx.restore();
+  }
+
+  // Nageoires avant, longues comme des ailes
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(r * 0.35, side * r * 0.45);
+    flipper(r * 1.45, r * 0.42, -side * (0.85 + stroke * 0.45));
     ctx.restore();
   }
 
   // Tête
   ctx.beginPath();
-  ctx.arc(t.r + 4, 0, 8, 0, Math.PI * 2);
+  ctx.ellipse(r * 1.08, 0, r * 0.36, r * 0.27, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#111";
+  ctx.stroke();
+
+  // Carapace en goutte
   ctx.beginPath();
-  ctx.arc(t.r + 7, -3, 1.6, 0, Math.PI * 2);
+  ctx.moveTo(r * 0.85, 0);
+  ctx.bezierCurveTo(r * 0.85, -r * 0.82, -r * 0.75, -r * 0.8, -r * 1.05, 0);
+  ctx.bezierCurveTo(-r * 0.75, r * 0.8, r * 0.85, r * 0.82, r * 0.85, 0);
+  ctx.fill();
+  ctx.stroke();
+
+  // Reflet de lumière venant de la surface
+  const sheen = ctx.createLinearGradient(0, -r * 0.7, 0, r * 0.7);
+  sheen.addColorStop(0, "rgba(120, 180, 230, 0.16)");
+  sheen.addColorStop(0.5, "rgba(120, 180, 230, 0)");
+  ctx.fillStyle = sheen;
   ctx.fill();
 
-  // Carapace
-  ctx.fillStyle = "#2f6b45";
+  // Écailles, à peine visibles
+  ctx.strokeStyle = "rgba(150, 205, 255, 0.1)";
   ctx.beginPath();
-  ctx.ellipse(0, 0, t.r, t.r * 0.75, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#8fd18f";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, t.r * 0.5, t.r * 0.4, 0, 0, Math.PI * 2);
-  ctx.moveTo(-t.r, 0);
-  ctx.lineTo(-t.r * 0.5, 0);
-  ctx.moveTo(t.r * 0.5, 0);
-  ctx.lineTo(t.r, 0);
+  ctx.moveTo(r * 0.55, 0);
+  ctx.lineTo(r * 0.2, -r * 0.28);
+  ctx.lineTo(-r * 0.35, -r * 0.28);
+  ctx.lineTo(-r * 0.7, 0);
+  ctx.lineTo(-r * 0.35, r * 0.28);
+  ctx.lineTo(r * 0.2, r * 0.28);
+  ctx.closePath();
+  ctx.moveTo(r * 0.2, -r * 0.28);
+  ctx.lineTo(r * 0.2, r * 0.28);
+  ctx.moveTo(-r * 0.35, -r * 0.28);
+  ctx.lineTo(-r * 0.35, r * 0.28);
   ctx.stroke();
 
   ctx.restore();
