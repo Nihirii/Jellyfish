@@ -1,5 +1,5 @@
 # 🪼 Méduses
-
+**[Jouer en ligne](https://nihirii.github.io/Jellyfish/)**
 Un petit jeu d'arcade dans le navigateur : tu guides une méduse dans les profondeurs, tu manges du plancton lumineux et tu évites les tortues de mer qui traversent l'écran.
 
 HTML, CSS et JavaScript vanilla avec `<canvas>`. Pas de dépendance, pas de build. Ça se joue sur ordinateur comme sur mobile.
