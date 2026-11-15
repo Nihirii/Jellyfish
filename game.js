@@ -14,7 +14,73 @@ const overlayText = document.getElementById("overlay-text");
 const playBtn = document.getElementById("play");
 
 const BEST_KEY = "meduses-best";
-const KEY_SPEED = 260; // px/s avec le clavier
+const KEY_LEAD = 80; // avance de la cible au clavier (~250 px/s en moyenne)
+
+// ---------- Couleurs de la méduse ----------
+// Chaque palier change la teinte de la méduse ; on passe de l'un à l'autre
+// en douceur. Les couleurs sont des triplets RVB.
+const TIERS = [
+  {
+    at: 0,
+    name: "Bleu lune",
+    pal: {
+      halo: [140, 190, 255], tent: [190, 215, 255], arm: [225, 190, 240],
+      top: [215, 232, 255], mid: [170, 195, 255], rim: [225, 240, 255], gonad: [240, 190, 230],
+    },
+  },
+  {
+    at: 10,
+    name: "Lagon",
+    pal: {
+      halo: [100, 240, 215], tent: [165, 255, 235], arm: [190, 235, 255],
+      top: [205, 255, 245], mid: [120, 225, 210], rim: [215, 255, 250], gonad: [255, 200, 230],
+    },
+  },
+  {
+    at: 25,
+    name: "Rose aurore",
+    pal: {
+      halo: [255, 105, 165], tent: [255, 175, 210], arm: [255, 210, 175],
+      top: [255, 200, 225], mid: [255, 115, 180], rim: [255, 225, 238], gonad: [255, 240, 170],
+    },
+  },
+  {
+    at: 50,
+    name: "Abysse violet",
+    pal: {
+      halo: [150, 75, 255], tent: [195, 160, 255], arm: [235, 140, 255],
+      top: [215, 185, 255], mid: [145, 80, 255], rim: [230, 215, 255], gonad: [130, 255, 225],
+    },
+  },
+  {
+    at: 80,
+    name: "Corail de feu",
+    pal: {
+      halo: [255, 120, 90], tent: [255, 185, 150], arm: [255, 225, 140],
+      top: [255, 220, 200], mid: [255, 125, 95], rim: [255, 235, 220], gonad: [255, 250, 160],
+    },
+  },
+];
+
+// Easter egg : la méduse lune dorée
+const GOLD = {
+  halo: [255, 205, 100], tent: [255, 225, 150], arm: [255, 195, 115],
+  top: [255, 242, 195], mid: [255, 195, 80], rim: [255, 248, 210], gonad: [255, 160, 80],
+};
+const GOLD_DURATION = 10; // secondes
+const SECRET_WORD = "lune";
+const SECRET_TAPS = 5; // touches rapides sur la méduse
+
+const clonePal = (pal) => Object.fromEntries(Object.entries(pal).map(([k, c]) => [k, [...c]]));
+const rgba = (c, a) => `rgba(${c[0] | 0}, ${c[1] | 0}, ${c[2] | 0}, ${a})`;
+
+function tierFor(value) {
+  let index = 0;
+  TIERS.forEach((t, i) => {
+    if (value >= t.at) index = i;
+  });
+  return index;
+}
 
 // ---------- État ----------
 let jelly;
@@ -28,6 +94,12 @@ let running = false;
 let lastTime = 0;
 let elapsed = 0;
 let turtleTimer = 0;
+let tierIndex = 0;
+let golden = 0; // temps restant en mode doré
+let goldenUsed = false; // une seule fois par partie
+let typed = "";
+let taps = [];
+let banner = null; // { text, color, life }
 
 const pointer = { x: W / 2, y: H * 0.7, active: false };
 const keys = new Set();
@@ -89,6 +161,12 @@ function reset() {
   score = 0;
   elapsed = 0;
   turtleTimer = 1.5;
+  tierIndex = 0;
+  golden = 0;
+  goldenUsed = false;
+  typed = "";
+  taps = [];
+  banner = null;
   pointer.x = jelly.x;
   pointer.y = jelly.y;
   scoreEl.textContent = "0";
@@ -111,7 +189,9 @@ function gameOver() {
   } else {
     overlayTitle.textContent = "Croquée !";
   }
-  overlayText.textContent = `Ta méduse a mangé ${score} plancton${score > 1 ? "s" : ""}.`;
+  overlayText.textContent =
+    `Ta méduse a mangé ${score} plancton${score > 1 ? "s" : ""}` +
+    ` et a atteint la couleur ${TIERS[tierIndex].name}.`;
   playBtn.textContent = "Rejouer";
   overlay.hidden = false;
   playBtn.focus();
@@ -142,11 +222,31 @@ function update(dt) {
   if (keys.has("ArrowUp")) dy -= 1;
   if (keys.has("ArrowDown")) dy += 1;
   if (dx || dy) {
-    pointer.x = jelly.x + dx * KEY_SPEED * dt * 6;
-    pointer.y = jelly.y + dy * KEY_SPEED * dt * 6;
+    // Cible placée à distance fixe devant la méduse : la vitesse ne dépend
+    // plus de la fréquence d'images, et la diagonale n'est pas plus rapide.
+    const len = Math.hypot(dx, dy);
+    pointer.x = jelly.x + (dx / len) * KEY_LEAD;
+    pointer.y = jelly.y + (dy / len) * KEY_LEAD;
   }
 
   updateJelly(jelly, dt);
+
+  // Mode doré et couleur courante, qui glisse vers la couleur cible
+  if (golden > 0) {
+    golden = Math.max(0, golden - dt);
+    if (golden === 0) showBanner(TIERS[tierIndex].name, TIERS[tierIndex].pal.halo);
+  }
+  const target = golden > 0 ? GOLD : TIERS[tierIndex].pal;
+  const blend = 1 - Math.exp(-4 * dt);
+  for (const key in target) {
+    for (let c = 0; c < 3; c++) {
+      jelly.col[key][c] += (target[key][c] - jelly.col[key][c]) * blend;
+    }
+  }
+  if (banner) {
+    banner.life -= dt;
+    if (banner.life <= 0) banner = null;
+  }
 
   // Plancton : dérive lente, puis mangé au contact
   for (let i = 0; i < plankton.length; i++) {
@@ -155,10 +255,18 @@ function update(dt) {
     p.x = p.hx + Math.sin(elapsed * 0.7 + p.phase) * 10;
     p.y = p.hy + Math.cos(elapsed * 0.5 + p.phase * 1.3) * 7;
     if (p.age > 0.3 && dist(jelly, p) < jelly.r + p.r) {
-      burst(p.x, p.y);
+      burst(p.x, p.y, golden > 0 ? GOLD.halo : [160, 255, 230]);
       plankton[i] = spawnPlankton();
-      score++;
+      score += golden > 0 ? 2 : 1;
       scoreEl.textContent = score;
+
+      const next = tierFor(score);
+      if (next > tierIndex) {
+        tierIndex = next;
+        const tier = TIERS[tierIndex];
+        burst(jelly.x, jelly.y, tier.pal.halo, 30);
+        if (golden === 0) showBanner(tier.name, tier.pal.halo);
+      }
     }
   }
 
@@ -181,9 +289,16 @@ function update(dt) {
     t.x += t.vx * dt;
     t.phase += dt * 2.4;
     t.y = t.baseY + Math.sin(t.phase * 0.5) * 5;
-    if (dist(jelly, t) < jelly.r + t.r - 6) {
-      gameOver();
-      return;
+    if (!t.fleeing && dist(jelly, t) < jelly.r + t.r - 6) {
+      if (golden > 0) {
+        // La méduse dorée repousse la tortue, qui fait demi-tour pour de bon
+        t.fleeing = true;
+        t.vx = -t.vx * 1.4;
+        burst(t.x, t.y, GOLD.halo, 20);
+      } else {
+        gameOver();
+        return;
+      }
     }
   }
   turtles = turtles.filter((t) => t.x > -70 && t.x < W + 70);
@@ -197,6 +312,33 @@ function draw(time) {
   for (const t of turtles) drawTurtle(t);
   drawJelly(jelly);
   drawVignette();
+  drawBanner();
+}
+
+// ---------- Méduse dorée et annonces ----------
+function showBanner(text, color) {
+  banner = { text, color, life: 2 };
+}
+
+function activateGolden() {
+  if (!running || goldenUsed) return;
+  goldenUsed = true;
+  golden = GOLD_DURATION;
+  burst(jelly.x, jelly.y, GOLD.halo, 40);
+  showBanner("Méduse lune dorée !", GOLD.halo);
+}
+
+function drawBanner() {
+  if (!banner) return;
+  const a = Math.min(1, banner.life / 0.5) * Math.min(1, (2 - banner.life) / 0.25);
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.font = "700 22px system-ui, -apple-system, 'Segoe UI', sans-serif";
+  ctx.shadowColor = rgba(banner.color, 0.9 * a);
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = rgba([255, 255, 255], a);
+  ctx.fillText(banner.text, W / 2, 96);
+  ctx.restore();
 }
 
 // ---------- Eau ----------
@@ -313,11 +455,11 @@ function drawVignette() {
 // Un petit point bioluminescent : cœur net, halo doux et quelques
 // particules qui tournent autour.
 
-function burst(x, y) {
-  for (let i = 0; i < 14; i++) {
+function burst(x, y, color = [160, 255, 230], count = 14) {
+  for (let i = 0; i < count; i++) {
     const a = rand(0, Math.PI * 2);
-    const v = rand(20, 70);
-    sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rand(0.6, 1) });
+    const v = rand(20, 70) * (count > 14 ? 1.6 : 1);
+    sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rand(0.6, 1), color });
   }
 }
 
@@ -357,7 +499,7 @@ function drawSparks() {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   for (const s of sparks) {
-    ctx.fillStyle = `rgba(160, 255, 230, ${s.life * 0.8})`;
+    ctx.fillStyle = rgba(s.color, s.life * 0.8);
     ctx.beginPath();
     ctx.arc(s.x, s.y, 0.6 + s.life, 0, Math.PI * 2);
     ctx.fill();
@@ -395,7 +537,10 @@ function createJelly(x, y) {
   const arms = Array.from({ length: ARMS }, (_, i) =>
     makeChain(x, y, ARM_POINTS, ((i / (ARMS - 1)) * 2 - 1) * 0.25, 1, ARM_SEG, 2.4)
   );
-  const j = { x, y, r: 24, pulse: 0, contraction: 0, rx: 24, ry: 24, tentacles, arms };
+  const j = {
+    x, y, r: 24, pulse: 0, contraction: 0, rx: 24, ry: 24, tentacles, arms,
+    col: clonePal(TIERS[0].pal),
+  };
   for (const chain of [...tentacles, ...arms]) {
     chain.points.forEach((p, i) => Object.assign(p, restPoint(j, chain, i)));
   }
@@ -465,7 +610,7 @@ function strokeChain(chain, rgb, alpha) {
   ctx.lineCap = "butt"; // évite les points lumineux aux jointures
   for (let i = 1; i < pts.length; i++) {
     const t = i / pts.length;
-    ctx.strokeStyle = `rgba(${rgb}, ${alpha * (1 - t)})`;
+    ctx.strokeStyle = rgba(rgb, alpha * (1 - t));
     ctx.lineWidth = chain.width * (1 - t * 0.6);
     ctx.beginPath();
     ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
@@ -489,7 +634,8 @@ function bellPath(rx, ry) {
 }
 
 function drawJelly(j) {
-  const { rx, ry } = j;
+  const { rx, ry, col } = j;
+  const glow = golden > 0 ? 0.14 : 0; // la méduse dorée brille plus fort
 
   ctx.save();
   ctx.lineCap = "round";
@@ -497,39 +643,49 @@ function drawJelly(j) {
 
   // Halo bioluminescent
   const halo = ctx.createRadialGradient(j.x, j.y - ry * 0.3, 0, j.x, j.y - ry * 0.3, j.r * 3.2);
-  halo.addColorStop(0, `rgba(140, 190, 255, ${0.16 + j.contraction * 0.08})`);
-  halo.addColorStop(1, "rgba(140, 190, 255, 0)");
+  halo.addColorStop(0, rgba(col.halo, 0.16 + glow + j.contraction * 0.08));
+  halo.addColorStop(1, rgba(col.halo, 0));
   ctx.fillStyle = halo;
   ctx.fillRect(j.x - j.r * 4, j.y - j.r * 4, j.r * 8, j.r * 8);
 
+  // Anneau doré qui se vide : temps restant du mode doré
+  if (golden > 0) {
+    const blink = golden < 2 ? 0.5 + Math.sin(golden * 18) * 0.5 : 1;
+    ctx.strokeStyle = rgba(GOLD.halo, 0.6 * blink);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(j.x, j.y - ry * 0.2, j.r * 1.9, -Math.PI / 2, -Math.PI / 2 + (golden / GOLD_DURATION) * Math.PI * 2);
+    ctx.stroke();
+  }
+
   // Filaments fins puis bras buccaux plus épais
-  for (const t of j.tentacles) strokeChain(t, "190, 215, 255", 0.55);
-  for (const a of j.arms) strokeChain(a, "225, 190, 240", 0.35);
+  for (const t of j.tentacles) strokeChain(t, col.tent, 0.55);
+  for (const a of j.arms) strokeChain(a, col.arm, 0.35);
 
   ctx.translate(j.x, j.y);
 
   // Ombrelle translucide
   const body = ctx.createLinearGradient(0, -ry, 0, ry * 0.2);
-  body.addColorStop(0, "rgba(215, 232, 255, 0.42)");
-  body.addColorStop(0.7, "rgba(170, 195, 255, 0.16)");
-  body.addColorStop(1, "rgba(170, 195, 255, 0.06)");
+  body.addColorStop(0, rgba(col.top, 0.42 + glow));
+  body.addColorStop(0.7, rgba(col.mid, 0.16 + glow));
+  body.addColorStop(1, rgba(col.mid, 0.06));
   ctx.fillStyle = body;
   bellPath(rx, ry);
   ctx.fill();
 
   // Liseré lumineux
-  ctx.strokeStyle = "rgba(225, 240, 255, 0.55)";
+  ctx.strokeStyle = rgba(col.rim, 0.55);
   ctx.lineWidth = 1;
   ctx.stroke();
 
   // Bande interne plus claire, pour le volume
-  ctx.strokeStyle = "rgba(225, 240, 255, 0.18)";
+  ctx.strokeStyle = rgba(col.rim, 0.18);
   ctx.beginPath();
   ctx.ellipse(0, -ry * 0.05, rx * 0.82, ry * 0.18, 0, Math.PI, 0);
   ctx.stroke();
 
   // Gonades en trèfle, comme une méduse lune
-  ctx.strokeStyle = "rgba(240, 190, 230, 0.45)";
+  ctx.strokeStyle = rgba(col.gonad, 0.45);
   ctx.lineWidth = 1.1;
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
@@ -644,12 +800,24 @@ function setPointer(event) {
 }
 
 canvas.addEventListener("pointermove", setPointer);
-canvas.addEventListener("pointerdown", setPointer);
+canvas.addEventListener("pointerdown", (e) => {
+  setPointer(e);
+  // Secret : plusieurs touches rapides sur la méduse
+  if (!running || dist(pointer, jelly) > jelly.r * 1.8) return;
+  const now = performance.now();
+  taps = taps.filter((t) => now - t < 2000);
+  taps.push(now);
+  if (taps.length >= SECRET_TAPS) activateGolden();
+});
 
 window.addEventListener("keydown", (e) => {
   if (e.key.startsWith("Arrow")) {
     keys.add(e.key);
     e.preventDefault();
+  } else if (running && e.key.length === 1) {
+    // Secret : taper le mot magique pendant une partie
+    typed = (typed + e.key.toLowerCase()).slice(-SECRET_WORD.length);
+    if (typed === SECRET_WORD) activateGolden();
   }
 });
 window.addEventListener("keyup", (e) => keys.delete(e.key));
