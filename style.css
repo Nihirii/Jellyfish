@@ -58,6 +58,7 @@ canvas {
   display: block;
   width: 100%;
   height: auto;
+  aspect-ratio: 480 / 640;
   border-radius: 16px;
   box-shadow: 0 0 40px rgba(126, 249, 255, 0.15);
   touch-action: none;
@@ -110,4 +111,82 @@ button:hover,
 button:focus-visible {
   background: var(--pink);
   outline: none;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  margin: 0 2px;
+  padding: 1px 6px;
+  border: 1px solid rgba(143, 179, 204, 0.4);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85em;
+  text-align: center;
+}
+
+.keys {
+  display: block;
+  margin-top: 14px;
+  font-size: 0.9rem;
+}
+
+.hud {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ghost {
+  padding: 6px 14px;
+  border: 1px solid rgba(126, 249, 255, 0.35);
+  background: transparent;
+  color: var(--glow);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.ghost:hover,
+.ghost:focus-visible {
+  border-color: var(--glow);
+  background: rgba(126, 249, 255, 0.1);
+  color: var(--glow);
+}
+
+/* Le plein écran n'a d'intérêt que sur PC */
+body:not(.desktop) .ghost {
+  display: none;
+}
+
+/* ---------- Version PC : terrain panoramique qui remplit la fenêtre ---------- */
+body.desktop main {
+  width: min(calc(100vw - 48px), calc((100vh - 96px) * 16 / 9));
+  padding: 12px 0;
+}
+
+body.desktop h1 {
+  font-size: 1.75rem;
+}
+
+body.desktop .scores {
+  font-size: 1.1rem;
+}
+
+body.desktop .overlay {
+  gap: 12px;
+}
+
+body.desktop .overlay h2 {
+  font-size: 3rem;
+}
+
+body.desktop .overlay p {
+  font-size: 1.15rem;
+}
+
+body.desktop button#play {
+  padding: 12px 36px;
+  font-size: 1.1rem;
 }

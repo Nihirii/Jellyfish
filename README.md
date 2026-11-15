@@ -18,10 +18,16 @@ npx serve .
 
 ## Commandes
 
-| Action | Commande |
-| --- | --- |
-| Déplacer la méduse | Souris, doigt ou flèches du clavier |
-| Lancer une partie | Bouton **Jouer** |
+Sur un écran large, le jeu passe tout seul en **version PC** : terrain panoramique 16:9 qui remplit la fenêtre, plus de plancton et des tortues plus vives. Sur téléphone, il reste en portrait.
+
+| Action | PC | Mobile |
+| --- | --- | --- |
+| Déplacer la méduse | Souris, `ZQSD` / `WASD` ou flèches | Doigt |
+| Lancer ou relancer une partie | `Entrée`, `Espace` ou bouton **Jouer** | Bouton **Jouer** |
+| Pause | `Échap` ou `P` (et automatique quand tu changes de fenêtre) | Automatique quand tu quittes l'onglet |
+| Plein écran | `F` ou bouton **Plein écran** | — |
+
+`ZQSD` et `WASD` utilisent la position des touches : ça marche en AZERTY comme en QWERTY.
 
 ## Règles
 

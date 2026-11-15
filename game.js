@@ -3,8 +3,19 @@
 // ---------- Configuration ----------
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-const W = canvas.width;
-const H = canvas.height;
+
+// Deux formats : portrait pour le mobile, panoramique pour le PC.
+// Le monde a une taille logique fixe par format ; le canvas est rendu à la
+// résolution réelle de l'écran pour rester net.
+const MODES = {
+  mobile: { W: 480, H: 640, plankton: 5, turtleSpeed: 1, turtleGap: 1 },
+  desktop: { W: 1280, H: 720, plankton: 10, turtleSpeed: 1.5, turtleGap: 0.75 },
+};
+const desktopQuery = window.matchMedia("(min-width: 900px) and (min-aspect-ratio: 1/1)");
+let mode = null;
+let cfg = MODES.mobile;
+let W = cfg.W;
+let H = cfg.H;
 
 const scoreEl = document.getElementById("score");
 const bestEl = document.getElementById("best");
@@ -12,9 +23,28 @@ const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlay-title");
 const overlayText = document.getElementById("overlay-text");
 const playBtn = document.getElementById("play");
+const fullscreenBtn = document.getElementById("fullscreen");
 
 const BEST_KEY = "meduses-best";
 const KEY_LEAD = 80; // avance de la cible au clavier (~250 px/s en moyenne)
+
+// Déplacement : flèches + touches physiques WASD (= ZQSD sur un clavier AZERTY)
+const MOVE = {
+  ArrowLeft: [-1, 0], KeyA: [-1, 0],
+  ArrowRight: [1, 0], KeyD: [1, 0],
+  ArrowUp: [0, -1], KeyW: [0, -1],
+  ArrowDown: [0, 1], KeyS: [0, 1],
+};
+
+const INTRO = {
+  mobile:
+    "Guide ta méduse avec le doigt, la souris ou les flèches.<br />" +
+    "Mange le plancton lumineux, évite les tortues.",
+  desktop:
+    "Guide ta méduse à la souris, avec <kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> " +
+    "ou les flèches.<br />Mange le plancton lumineux, évite les tortues." +
+    '<span class="keys"><kbd>Entrée</kbd> jouer · <kbd>Échap</kbd> pause · <kbd>F</kbd> plein écran</span>',
+};
 
 // ---------- Couleurs de la méduse ----------
 // Chaque palier change la teinte de la méduse ; on passe de l'un à l'autre
@@ -91,6 +121,9 @@ let bubbles;
 let score;
 let best = readBest();
 let running = false;
+let paused = false;
+let screen = "intro"; // ce qu'affiche l'écran par-dessus le jeu : intro, pause ou fin
+let lastInput = "mouse";
 let lastTime = 0;
 let elapsed = 0;
 let turtleTimer = 0;
@@ -141,7 +174,7 @@ function spawnPlankton() {
 
 function spawnTurtle() {
   const fromLeft = Math.random() < 0.5;
-  const speed = rand(70, 120) + elapsed * 3; // ça accélère avec le temps
+  const speed = (rand(70, 120) + elapsed * 3) * cfg.turtleSpeed; // ça accélère avec le temps
   const y = rand(40, H - 40);
   return {
     x: fromLeft ? -50 : W + 50,
@@ -155,7 +188,7 @@ function spawnTurtle() {
 
 function reset() {
   jelly = createJelly(W / 2, H * 0.7);
-  plankton = Array.from({ length: 5 }, spawnPlankton);
+  plankton = Array.from({ length: cfg.plankton }, spawnPlankton);
   sparks = [];
   turtles = [];
   score = 0;
@@ -177,10 +210,38 @@ function start() {
   reset();
   overlay.hidden = true;
   running = true;
+  paused = false;
+}
+
+function showOverlay(title, html, button) {
+  overlayTitle.textContent = title;
+  overlayText.innerHTML = html;
+  playBtn.textContent = button;
+  overlay.hidden = false;
+  playBtn.focus({ preventScroll: true });
+}
+
+function pause() {
+  if (!running || paused) return;
+  paused = true;
+  screen = "pause";
+  keys.clear();
+  showOverlay(
+    "Pause",
+    mode === "desktop" ? "<kbd>Échap</kbd> ou <kbd>Entrée</kbd> pour reprendre." : "La méduse t'attend.",
+    "Reprendre"
+  );
+}
+
+function resume() {
+  if (!paused) return;
+  paused = false;
+  overlay.hidden = true;
 }
 
 function gameOver() {
   running = false;
+  screen = "over";
   if (score > best) {
     best = score;
     saveBest(best);
@@ -205,7 +266,7 @@ function loop(now) {
   const time = now / 1000;
 
   updateWater(dt, time);
-  if (running) update(dt);
+  if (running && !paused) update(dt);
   draw(time);
 
   requestAnimationFrame(loop);
@@ -217,10 +278,12 @@ function update(dt) {
   // Déplacement clavier : on pousse la cible
   let dx = 0;
   let dy = 0;
-  if (keys.has("ArrowLeft")) dx -= 1;
-  if (keys.has("ArrowRight")) dx += 1;
-  if (keys.has("ArrowUp")) dy -= 1;
-  if (keys.has("ArrowDown")) dy += 1;
+  for (const code of keys) {
+    dx += MOVE[code][0];
+    dy += MOVE[code][1];
+  }
+  dx = Math.sign(dx);
+  dy = Math.sign(dy);
   if (dx || dy) {
     // Cible placée à distance fixe devant la méduse : la vitesse ne dépend
     // plus de la fréquence d'images, et la diagonale n'est pas plus rapide.
@@ -283,7 +346,7 @@ function update(dt) {
   turtleTimer -= dt;
   if (turtleTimer <= 0) {
     turtles.push(spawnTurtle());
-    turtleTimer = Math.max(0.5, 2 - elapsed * 0.03);
+    turtleTimer = Math.max(0.5, 2 - elapsed * 0.03) * cfg.turtleGap;
   }
   for (const t of turtles) {
     t.x += t.vx * dt;
@@ -312,7 +375,24 @@ function draw(time) {
   for (const t of turtles) drawTurtle(t);
   drawJelly(jelly);
   drawVignette();
+  drawReticle();
   drawBanner();
+}
+
+// Petit viseur discret là où pointe la souris (le curseur est masqué)
+function drawReticle() {
+  if (!running || paused || lastInput !== "mouse" || mode !== "desktop") return;
+  ctx.save();
+  ctx.strokeStyle = "rgba(200, 230, 255, 0.35)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(pointer.x, pointer.y, 7, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(200, 230, 255, 0.6)";
+  ctx.beginPath();
+  ctx.arc(pointer.x, pointer.y, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 // ---------- Méduse dorée et annonces ----------
@@ -333,11 +413,11 @@ function drawBanner() {
   const a = Math.min(1, banner.life / 0.5) * Math.min(1, (2 - banner.life) / 0.25);
   ctx.save();
   ctx.textAlign = "center";
-  ctx.font = "700 22px system-ui, -apple-system, 'Segoe UI', sans-serif";
+  ctx.font = `700 ${mode === "desktop" ? 30 : 22}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
   ctx.shadowColor = rgba(banner.color, 0.9 * a);
   ctx.shadowBlur = 16;
   ctx.fillStyle = rgba([255, 255, 255], a);
-  ctx.fillText(banner.text, W / 2, 96);
+  ctx.fillText(banner.text, W / 2, mode === "desktop" ? 110 : 96);
   ctx.restore();
 }
 
@@ -345,38 +425,45 @@ function drawBanner() {
 // Plusieurs couches légères qui bougent à des vitesses différentes :
 // dégradé de profondeur, rayons de lumière, reflets de surface et neige marine.
 
-const RAYS = Array.from({ length: 6 }, (_, i) => ({
-  x: (i + 0.5) * (W / 6) + rand(-30, 30),
-  width: rand(30, 70),
-  spread: rand(60, 140),
-  speed: rand(0.12, 0.25),
-  phase: rand(0, Math.PI * 2),
-  strength: rand(0.05, 0.1),
-}));
+let RAYS, SNOW, waterGradient, vignette;
 
-const SNOW = Array.from({ length: 70 }, () => ({
-  x: rand(0, W),
-  y: rand(0, H),
-  z: rand(0.25, 1), // profondeur : 1 = proche
-  phase: rand(0, Math.PI * 2),
-}));
+// Recrée le décor quand la taille du monde change
+function buildScene() {
+  const rayCount = Math.round(W / 80);
+  RAYS = Array.from({ length: rayCount }, (_, i) => ({
+    x: (i + 0.5) * (W / rayCount) + rand(-30, 30),
+    width: rand(30, 70),
+    spread: rand(60, 140),
+    speed: rand(0.12, 0.25),
+    phase: rand(0, Math.PI * 2),
+    strength: rand(0.05, 0.1),
+  }));
 
-// Le fond ne change pas : on le prépare une fois
-const waterGradient = (() => {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#164a7a");
-  g.addColorStop(0.35, "#0b2852");
-  g.addColorStop(0.75, "#05132e");
-  g.addColorStop(1, "#020714");
-  return g;
-})();
+  SNOW = Array.from({ length: Math.round((W * H) / 4400) }, () => ({
+    x: rand(0, W),
+    y: rand(0, H),
+    z: rand(0.25, 1), // profondeur : 1 = proche
+    phase: rand(0, Math.PI * 2),
+  }));
 
-const vignette = (() => {
-  const g = ctx.createRadialGradient(W / 2, H * 0.45, H * 0.3, W / 2, H * 0.45, H * 0.8);
-  g.addColorStop(0, "rgba(0, 0, 0, 0)");
-  g.addColorStop(1, "rgba(0, 4, 14, 0.55)");
-  return g;
-})();
+  // Le fond ne change pas pendant la partie : on le prépare une fois
+  waterGradient = (() => {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#164a7a");
+    g.addColorStop(0.35, "#0b2852");
+    g.addColorStop(0.75, "#05132e");
+    g.addColorStop(1, "#020714");
+    return g;
+  })();
+
+  vignette = (() => {
+    const reach = Math.max(W, H);
+    const g = ctx.createRadialGradient(W / 2, H * 0.45, reach * 0.3, W / 2, H * 0.45, reach * 0.8);
+    g.addColorStop(0, "rgba(0, 0, 0, 0)");
+    g.addColorStop(1, "rgba(0, 4, 14, 0.55)");
+    return g;
+  })();
+}
 
 function updateWater(dt, time) {
   for (const s of SNOW) {
@@ -799,7 +886,10 @@ function setPointer(event) {
   pointer.y = ((event.clientY - rect.top) / rect.height) * H;
 }
 
-canvas.addEventListener("pointermove", setPointer);
+canvas.addEventListener("pointermove", (e) => {
+  setPointer(e);
+  if (e.pointerType === "mouse") lastInput = "mouse";
+});
 canvas.addEventListener("pointerdown", (e) => {
   setPointer(e);
   // Secret : plusieurs touches rapides sur la méduse
@@ -811,20 +901,122 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 window.addEventListener("keydown", (e) => {
-  if (e.key.startsWith("Arrow")) {
-    keys.add(e.key);
+  if (MOVE[e.code]) {
     e.preventDefault();
-  } else if (running && e.key.length === 1) {
+    if (running && !paused) {
+      keys.add(e.code);
+      lastInput = "keys";
+    }
+    return;
+  }
+
+  if (e.code === "Escape" || e.code === "KeyP") {
+    if (paused) resume();
+    else pause();
+    return;
+  }
+
+  if (e.code === "KeyF" && !e.repeat) {
+    toggleFullscreen();
+    return;
+  }
+
+  if ((e.code === "Enter" || e.code === "Space") && !overlay.hidden) {
+    // Si le bouton a le focus, le navigateur le déclenche déjà
+    if (document.activeElement !== playBtn) {
+      e.preventDefault();
+      playBtn.click();
+    }
+    return;
+  }
+
+  if (running && !paused && e.key.length === 1) {
     // Secret : taper le mot magique pendant une partie
     typed = (typed + e.key.toLowerCase()).slice(-SECRET_WORD.length);
     if (typed === SECRET_WORD) activateGolden();
   }
 });
-window.addEventListener("keyup", (e) => keys.delete(e.key));
+window.addEventListener("keyup", (e) => keys.delete(e.code));
 
-playBtn.addEventListener("click", start);
+// Pause automatique quand on quitte la fenêtre
+window.addEventListener("blur", () => {
+  keys.clear();
+  pause();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) pause();
+});
+
+playBtn.addEventListener("click", () => (paused ? resume() : start()));
+
+// ---------- Plein écran ----------
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else if (document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  }
+}
+
+fullscreenBtn.addEventListener("click", () => {
+  toggleFullscreen();
+  fullscreenBtn.blur();
+});
+document.addEventListener("fullscreenchange", () => {
+  fullscreenBtn.textContent = document.fullscreenElement ? "Quitter le plein écran" : "Plein écran";
+});
+
+// ---------- Format et résolution ----------
+function rescaleWorld(sx, sy) {
+  const move = (p) => {
+    p.x *= sx;
+    p.y *= sy;
+  };
+  move(jelly);
+  move(pointer);
+  for (const chain of [...jelly.tentacles, ...jelly.arms]) chain.points.forEach(move);
+  for (const p of plankton) {
+    p.hx *= sx;
+    p.hy *= sy;
+  }
+  for (const t of turtles) {
+    t.x *= sx;
+    t.y *= sy;
+    t.baseY *= sy;
+  }
+  sparks.forEach(move);
+  while (plankton.length < cfg.plankton) plankton.push(spawnPlankton());
+  plankton.length = cfg.plankton;
+}
+
+function applyLayout() {
+  const next = desktopQuery.matches ? "desktop" : "mobile";
+  if (next !== mode) {
+    const old = mode ? cfg : null;
+    mode = next;
+    cfg = MODES[mode];
+    W = cfg.W;
+    H = cfg.H;
+    document.body.classList.toggle("desktop", mode === "desktop");
+    canvas.style.aspectRatio = `${W} / ${H}`;
+    if (old && jelly) rescaleWorld(W / old.W, H / old.H);
+    buildScene();
+    if (screen === "intro") overlayText.innerHTML = INTRO[mode];
+  }
+
+  // Résolution réelle : net sur les grands écrans et les écrans Retina
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  const scale = canvas.width / W;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+}
+
+window.addEventListener("resize", applyLayout);
 
 // Écran d'accueil
+applyLayout();
 reset();
 lastTime = performance.now();
 requestAnimationFrame(loop);
